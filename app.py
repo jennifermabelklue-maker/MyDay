@@ -9,7 +9,7 @@ import sqlite3
 import pandas as pd
 import plotly.express as px
 
-from datetime import datetime, date
+from datetime import datetime, date, timedelta, time as datetime_time
 
 # ============================================================
 # APP CONFIG
@@ -99,9 +99,23 @@ def create_tables():
         priority TEXT,
         due_date TEXT,
         done INTEGER DEFAULT 0,
-        created_at TEXT
+        created_at TEXT,
+        reminder_at TEXT
     )
     """)
+
+    task_columns = [
+        row[1]
+        for row in cur.execute(
+            "PRAGMA table_info(tasks)"
+        ).fetchall()
+    ]
+
+    if "reminder_at" not in task_columns:
+
+        cur.execute(
+            "ALTER TABLE tasks ADD COLUMN reminder_at TEXT"
+        )
 
     # GOALS
 
@@ -242,72 +256,265 @@ def get_level():
     return (xp // 100) + 1
 
 
+def reminder_text(value):
+
+    if not value:
+
+        return "No reminder"
+
+    try:
+
+        return datetime.fromisoformat(value).strftime(
+            "%d %b %Y, %H:%M"
+        )
+
+    except ValueError:
+
+        return str(value)
+
+
+def get_due_reminders(tasks):
+
+    if tasks.empty or "reminder_at" not in tasks.columns:
+
+        return pd.DataFrame()
+
+    reminders = tasks[
+        (tasks["done"] == 0) &
+        (tasks["reminder_at"].notna()) &
+        (tasks["reminder_at"] != "")
+    ].copy()
+
+    if reminders.empty:
+
+        return pd.DataFrame()
+
+    reminders["reminder_dt"] = pd.to_datetime(
+        reminders["reminder_at"],
+        errors="coerce"
+    )
+
+    return reminders[
+        reminders["reminder_dt"] <= pd.Timestamp.now()
+    ].sort_values("reminder_dt")
+
+
+def get_upcoming_reminders(tasks):
+
+    if tasks.empty or "reminder_at" not in tasks.columns:
+
+        return pd.DataFrame()
+
+    reminders = tasks[
+        (tasks["done"] == 0) &
+        (tasks["reminder_at"].notna()) &
+        (tasks["reminder_at"] != "")
+    ].copy()
+
+    if reminders.empty:
+
+        return pd.DataFrame()
+
+    reminders["reminder_dt"] = pd.to_datetime(
+        reminders["reminder_at"],
+        errors="coerce"
+    )
+
+    now = pd.Timestamp.now()
+
+    return reminders[
+        reminders["reminder_dt"] > now
+    ].sort_values("reminder_dt")
+
+
+def snooze_reminder(task_id, minutes):
+
+    reminder_at = (
+        datetime.now() + timedelta(minutes=minutes)
+    ).isoformat(
+        timespec="minutes"
+    )
+
+    run_query(
+        """
+        UPDATE tasks
+        SET reminder_at = ?
+        WHERE id = ?
+        """,
+        (
+            reminder_at,
+            task_id
+        )
+    )
+
+
+THEMES = {
+    "Midnight": {
+        "app_bg": "#0f1117",
+        "sidebar_bg": "#262833",
+        "card_bg": "#171923",
+        "card_bg_2": "#111827",
+        "border": "#2d3340",
+        "text": "#f9fafb",
+        "muted": "#cbd5e1",
+        "accent": "#2563eb",
+        "accent_2": "#7c3aed",
+        "alert_bg": "#172a3f",
+        "alert_text": "#60a5fa",
+        "input_bg": "#262833",
+    },
+    "Ocean": {
+        "app_bg": "#07131f",
+        "sidebar_bg": "#0b2436",
+        "card_bg": "#0f2a3d",
+        "card_bg_2": "#0b1d2d",
+        "border": "#1f6f8b",
+        "text": "#f3fbff",
+        "muted": "#b6d9e8",
+        "accent": "#0891b2",
+        "accent_2": "#2563eb",
+        "alert_bg": "#123447",
+        "alert_text": "#67e8f9",
+        "input_bg": "#102c3d",
+    },
+    "Forest": {
+        "app_bg": "#0f1712",
+        "sidebar_bg": "#16251b",
+        "card_bg": "#18291e",
+        "card_bg_2": "#101c15",
+        "border": "#2f5d3a",
+        "text": "#f6fff8",
+        "muted": "#c8dfcf",
+        "accent": "#16a34a",
+        "accent_2": "#84cc16",
+        "alert_bg": "#17351f",
+        "alert_text": "#86efac",
+        "input_bg": "#1b2d21",
+    },
+    "Light": {
+        "app_bg": "#f6f7fb",
+        "sidebar_bg": "#ffffff",
+        "card_bg": "#ffffff",
+        "card_bg_2": "#eef2ff",
+        "border": "#d8dee9",
+        "text": "#111827",
+        "muted": "#4b5563",
+        "accent": "#2563eb",
+        "accent_2": "#7c3aed",
+        "alert_bg": "#dbeafe",
+        "alert_text": "#1d4ed8",
+        "input_bg": "#ffffff",
+    },
+}
+
+
 # ============================================================
 # THEME
-# DARK MODE SAFE
 # ============================================================
 
-st.markdown("""
+if "theme_name" not in st.session_state:
+
+    st.session_state.theme_name = "Midnight"
+
+theme = THEMES.get(
+    st.session_state.theme_name,
+    THEMES["Midnight"]
+)
+
+st.markdown(f"""
 <style>
 
-/* GLOBAL */
+.stApp {{
+    background:{theme["app_bg"]};
+}}
 
-.block-container{
+.block-container {{
     padding-top:1rem;
     padding-bottom:2rem;
-}
+}}
 
-/* METRIC CARDS */
+h1, h2, h3, h4, p, label, span {{
+    color:{theme["text"]} !important;
+}}
 
-[data-testid="stMetric"]{
-    background-color:var(--secondary-background-color);
-    border:1px solid rgba(120,120,120,0.2);
+[data-testid="stMetric"] {{
+    background:linear-gradient(
+        145deg,
+        {theme["card_bg"]},
+        {theme["card_bg_2"]}
+    );
+    border:1px solid {theme["border"]};
     border-radius:18px;
     padding:18px;
-}
+    box-shadow:0 12px 28px rgba(0,0,0,0.20);
+}}
 
-/* BUTTONS */
+[data-testid="stMetricLabel"],
+[data-testid="stMetricDelta"] {{
+    color:{theme["muted"]} !important;
+}}
 
-.stButton button{
+[data-testid="stMetricValue"] {{
+    color:{theme["text"]} !important;
+}}
+
+.stButton button {{
     border-radius:12px;
     width:100%;
     font-weight:600;
-}
+    background:{theme["accent"]};
+    color:white !important;
+    border:none;
+}}
 
-/* CONTAINERS */
+.stButton button:hover {{
+    background:{theme["accent_2"]};
+    color:white !important;
+}}
 
-div[data-testid="stVerticalBlockBorderWrapper"]{
+div[data-testid="stVerticalBlockBorderWrapper"] {{
     border-radius:16px;
-}
+    border-color:{theme["border"]} !important;
+    background:{theme["card_bg_2"]} !important;
+}}
 
-/* FOCUS CARD */
-
-.focus-card{
+.focus-card {{
     background:linear-gradient(
         135deg,
-        #2563eb,
-        #7c3aed
+        {theme["accent"]},
+        {theme["accent_2"]}
     );
-
     color:white;
-
     padding:30px;
-
     border-radius:20px;
-
     text-align:center;
-}
+}}
 
-/* SIDEBAR */
+.focus-card h2,
+.focus-card h3,
+.focus-card p {{
+    color:white !important;
+}}
 
-section[data-testid="stSidebar"]{
-    border-right:1px solid rgba(
-        120,
-        120,
-        120,
-        0.15
-    );
-}
+section[data-testid="stSidebar"] {{
+    background:{theme["sidebar_bg"]};
+    border-right:1px solid {theme["border"]};
+}}
+
+.stAlert {{
+    background:{theme["alert_bg"]} !important;
+    color:{theme["alert_text"]} !important;
+    border-radius:12px;
+}}
+
+.stAlert p {{
+    color:{theme["alert_text"]} !important;
+}}
+
+input, textarea {{
+    color:{theme["text"]} !important;
+    background-color:{theme["input_bg"]} !important;
+}}
 
 </style>
 """, unsafe_allow_html=True)
@@ -356,6 +563,19 @@ st.sidebar.title("🚀 MyDay Pro")
 st.sidebar.caption(
     f"Level {get_level()} | {get_xp()} XP"
 )
+
+theme_choice = st.sidebar.selectbox(
+    "Theme",
+    list(THEMES.keys()),
+    index=list(THEMES.keys()).index(
+        st.session_state.theme_name
+    ),
+)
+
+if theme_choice != st.session_state.theme_name:
+
+    st.session_state.theme_name = theme_choice
+    st.rerun()
 
 page = st.sidebar.radio(
     "Navigation",
@@ -442,6 +662,69 @@ if page == "Dashboard":
     st.subheader("⭐ Today's Focus")
 
     st.info(today_focus)
+
+    due_reminders = get_due_reminders(tasks)
+
+    if not due_reminders.empty:
+
+        st.subheader("🔔 Due Reminders")
+
+        for _, task in due_reminders.iterrows():
+
+            with st.container(border=True):
+
+                left, middle, right = st.columns([5, 1, 1])
+
+                with left:
+
+                    st.warning(
+                        f"{task['title']} — reminder was set for "
+                        f"{reminder_text(task['reminder_at'])}"
+                    )
+
+                with middle:
+
+                    if st.button(
+                        "Snooze 1h",
+                        key=f"dash_snooze_{task['id']}"
+                    ):
+
+                        snooze_reminder(task["id"], 60)
+                        st.rerun()
+
+                with right:
+
+                    if st.button(
+                        "Done",
+                        key=f"dash_done_reminder_{task['id']}"
+                    ):
+
+                        run_query(
+                            """
+                            UPDATE tasks
+                            SET done = 1
+                            WHERE id = ?
+                            """,
+                            (
+                                task["id"],
+                            )
+                        )
+
+                        add_xp(10)
+                        st.rerun()
+
+    upcoming_reminders = get_upcoming_reminders(tasks).head(3)
+
+    if not upcoming_reminders.empty:
+
+        with st.expander("Upcoming Reminders"):
+
+            for _, task in upcoming_reminders.iterrows():
+
+                st.write(
+                    f"**{task['title']}** — "
+                    f"{reminder_text(task['reminder_at'])}"
+                )
 
     # ========================================================
     # KPI CARDS
@@ -840,6 +1123,55 @@ elif page == "Tasks":
                 "Due Date"
             )
 
+            reminder_at = None
+
+            reminder_choice = st.selectbox(
+                "Reminder",
+                [
+                    "None",
+                    "Today 18:00",
+                    "Tomorrow 09:00",
+                    "Custom"
+                ]
+            )
+
+            if reminder_choice == "Today 18:00":
+
+                reminder_at = datetime.combine(
+                    date.today(),
+                    datetime_time(18, 0)
+                ).isoformat(
+                    timespec="minutes"
+                )
+
+            elif reminder_choice == "Tomorrow 09:00":
+
+                reminder_at = datetime.combine(
+                    date.today() + timedelta(days=1),
+                    datetime_time(9, 0)
+                ).isoformat(
+                    timespec="minutes"
+                )
+
+            elif reminder_choice == "Custom":
+
+                reminder_date = st.date_input(
+                    "Reminder Date",
+                    value=due_date
+                )
+
+                reminder_time = st.time_input(
+                    "Reminder Time",
+                    value=datetime_time(9, 0)
+                )
+
+                reminder_at = datetime.combine(
+                    reminder_date,
+                    reminder_time
+                ).isoformat(
+                    timespec="minutes"
+                )
+
             submitted = st.form_submit_button(
                 "Add Task"
             )
@@ -857,10 +1189,11 @@ elif page == "Tasks":
                             priority,
                             due_date,
                             done,
-                            created_at
+                            created_at,
+                            reminder_at
                         )
                         VALUES
-                        (?, ?, ?, ?, ?, ?)
+                        (?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             title,
@@ -870,7 +1203,8 @@ elif page == "Tasks":
                             0,
                             datetime.now().isoformat(
                                 timespec="seconds"
-                            )
+                            ),
+                            reminder_at
                         )
                     )
 
@@ -940,13 +1274,83 @@ elif page == "Tasks":
 
     st.divider()
 
+    due_reminders = get_due_reminders(tasks)
+
+    if not due_reminders.empty:
+
+        st.subheader("🔔 Due Reminders")
+
+        for _, task in due_reminders.iterrows():
+
+            with st.container(border=True):
+
+                left, middle, right = st.columns([5, 1, 1])
+
+                with left:
+
+                    st.warning(
+                        f"{task['title']} — reminder was set for "
+                        f"{reminder_text(task['reminder_at'])}"
+                    )
+
+                with middle:
+
+                    if st.button(
+                        "Snooze 1h",
+                        key=f"task_snooze_{task['id']}"
+                    ):
+
+                        snooze_reminder(task["id"], 60)
+                        st.rerun()
+
+                with right:
+
+                    if st.button(
+                        "Done",
+                        key=f"task_done_reminder_{task['id']}"
+                    ):
+
+                        run_query(
+                            """
+                            UPDATE tasks
+                            SET done = 1
+                            WHERE id = ?
+                            """,
+                            (
+                                task["id"],
+                            )
+                        )
+
+                        add_xp(10)
+                        st.rerun()
+
+        st.divider()
+
+    upcoming_reminders = get_upcoming_reminders(tasks).head(5)
+
+    if not upcoming_reminders.empty:
+
+        with st.expander("Upcoming Reminders"):
+
+            for _, task in upcoming_reminders.iterrows():
+
+                st.write(
+                    f"**{task['title']}** — "
+                    f"{reminder_text(task['reminder_at'])}"
+                )
+
     # ========================================================
     # FILTERS
     # ========================================================
 
     if not tasks.empty:
 
-        f1, f2 = st.columns(2)
+        search_text = st.text_input(
+            "Search Tasks",
+            placeholder="Search by task name, category, or priority"
+        )
+
+        f1, f2, f3 = st.columns(3)
 
         with f1:
 
@@ -973,7 +1377,41 @@ elif page == "Tasks":
                 categories
             )
 
+        with f3:
+
+            reminder_filter = st.selectbox(
+                "Reminder",
+                [
+                    "All",
+                    "Due Now",
+                    "Upcoming",
+                    "No Reminder"
+                ]
+            )
+
         filtered = tasks.copy()
+
+        if search_text.strip():
+
+            search = search_text.strip()
+
+            filtered = filtered[
+                filtered["title"].astype(str).str.contains(
+                    search,
+                    case=False,
+                    na=False
+                ) |
+                filtered["category"].astype(str).str.contains(
+                    search,
+                    case=False,
+                    na=False
+                ) |
+                filtered["priority"].astype(str).str.contains(
+                    search,
+                    case=False,
+                    na=False
+                )
+            ]
 
         if status_filter == "Open":
 
@@ -993,6 +1431,43 @@ elif page == "Tasks":
                 filtered["category"]
                 == category_filter
             ]
+
+        if reminder_filter != "All":
+
+            filtered = filtered.copy()
+
+            if "reminder_at" not in filtered.columns:
+
+                filtered["reminder_at"] = None
+
+            reminder_dates = pd.to_datetime(
+                filtered["reminder_at"],
+                errors="coerce"
+            )
+
+            now = pd.Timestamp.now()
+
+            if reminder_filter == "Due Now":
+
+                filtered = filtered[
+                    (filtered["done"] == 0) &
+                    reminder_dates.notna() &
+                    (reminder_dates <= now)
+                ]
+
+            elif reminder_filter == "Upcoming":
+
+                filtered = filtered[
+                    (filtered["done"] == 0) &
+                    reminder_dates.notna() &
+                    (reminder_dates > now)
+                ]
+
+            elif reminder_filter == "No Reminder":
+
+                filtered = filtered[
+                    reminder_dates.isna()
+                ]
 
         # ====================================================
         # TASK CARDS
@@ -1042,6 +1517,11 @@ elif page == "Tasks":
                         f"{icon} {task['priority']} | "
                         f"{task['category']} | "
                         f"Due: {task['due_date']}"
+                    )
+
+                    st.caption(
+                        f"🔔 Reminder: "
+                        f"{reminder_text(task.get('reminder_at'))}"
                     )
 
                 with middle:
