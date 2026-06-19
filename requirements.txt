@@ -1,6 +1,10 @@
+streamlit
+pandas
+numpy
+plotly
 fastapi
 uvicorn
-streamlit
-requests
-pyjwt
 pydantic
+pyjwt
+python-multipart
+requests
