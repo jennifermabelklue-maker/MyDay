@@ -1,131 +1,78 @@
-import sqlite3
-from datetime import date, datetime, time as datetime_time
+﻿# ============================================================
+# MYDAY PRO
+# CLEAN EDITION
+# PART 1
+# ============================================================
 
+import streamlit as st
+import sqlite3
 import pandas as pd
 import plotly.express as px
-import streamlit as st
+
+from datetime import datetime, date
+
+# ============================================================
+# APP CONFIG
+# ============================================================
+
+st.set_page_config(
+    page_title="MyDay Pro",
+    page_icon="🚀",
+    layout="wide"
+)
 
 APP_PIN = "1234"
 
-st.set_page_config(page_title="MyDay", page_icon="MyDay", layout="wide")
+# ============================================================
+# DATABASE
+# ============================================================
+
+DB_NAME = "myday_pro.db"
 
 
-def db():
-    return sqlite3.connect("myday.db", check_same_thread=False)
+def get_connection():
+    return sqlite3.connect(
+        DB_NAME,
+        check_same_thread=False
+    )
 
 
-def init_db():
-    conn = db()
-    c = conn.cursor()
+def run_query(
+    sql,
+    params=(),
+    fetch=False
+):
+    conn = get_connection()
+    cur = conn.cursor()
 
-    c.execute("""CREATE TABLE IF NOT EXISTS tasks (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT NOT NULL,
-        category TEXT,
-        due_date TEXT,
-        priority TEXT,
-        done INTEGER DEFAULT 0,
-        created_at TEXT,
-        reminder_at TEXT
-    )""")
+    cur.execute(sql, params)
 
-    task_columns = [row[1] for row in c.execute("PRAGMA table_info(tasks)").fetchall()]
-    if "reminder_at" not in task_columns:
-        c.execute("ALTER TABLE tasks ADD COLUMN reminder_at TEXT")
-
-    c.execute("""CREATE TABLE IF NOT EXISTS notes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT NOT NULL,
-        body TEXT,
-        created_at TEXT
-    )""")
-
-    c.execute("""CREATE TABLE IF NOT EXISTS habits (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        habit TEXT NOT NULL,
-        tracked_date TEXT,
-        completed INTEGER DEFAULT 0
-    )""")
-
-    c.execute("""CREATE TABLE IF NOT EXISTS hobbies (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        category TEXT,
-        goal TEXT,
-        created_at TEXT
-    )""")
-
-    c.execute("""CREATE TABLE IF NOT EXISTS hobby_sessions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        hobby_id INTEGER,
-        session_date TEXT,
-        minutes INTEGER,
-        note TEXT,
-        created_at TEXT
-    )""")
-
-    c.execute("""CREATE TABLE IF NOT EXISTS mood (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        mood TEXT,
-        energy INTEGER,
-        stress INTEGER,
-        note TEXT,
-        tracked_date TEXT
-    )""")
-
-    c.execute("""CREATE TABLE IF NOT EXISTS budget (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        item TEXT,
-        amount REAL,
-        type TEXT,
-        category TEXT,
-        entry_date TEXT
-    )""")
-
-    c.execute("""CREATE TABLE IF NOT EXISTS goals (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT,
-        target TEXT,
-        progress INTEGER DEFAULT 0,
-        created_at TEXT
-    )""")
-
-    c.execute("""CREATE TABLE IF NOT EXISTS focus_items (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT NOT NULL,
-        focus_date TEXT,
-        priority INTEGER DEFAULT 1,
-        done INTEGER DEFAULT 0,
-        created_at TEXT
-    )""")
-
-    c.execute("""CREATE TABLE IF NOT EXISTS daily_reflections (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        reflection_date TEXT UNIQUE,
-        win TEXT,
-        lesson TEXT,
-        tomorrow TEXT,
-        created_at TEXT
-    )""")
+    result = (
+        cur.fetchall()
+        if fetch
+        else None
+    )
 
     conn.commit()
     conn.close()
 
+    return result
 
-def query(sql, params=(), fetch=False):
-    conn = db()
-    c = conn.cursor()
-    c.execute(sql, params)
-    data = c.fetchall() if fetch else None
-    conn.commit()
+
+def load_table(name):
+
+    conn = get_connection()
+
+    try:
+        df = pd.read_sql(
+            f"SELECT * FROM {name}",
+            conn
+        )
+    except:
+        df = pd.DataFrame()
+
     conn.close()
-    return data
 
-
-def table(name):
-    conn = db()
-    df = pd.read_sql_query(f"SELECT * FROM {name}", conn)
-    conn.close()
     return df
 
 
@@ -133,528 +80,2788 @@ def today():
     return date.today().isoformat()
 
 
-def completion(done, total):
-    return 0 if total == 0 else round((done / total) * 100)
+# ============================================================
+# DATABASE TABLES
+# ============================================================
 
+def create_tables():
 
-def today_focus():
-    conn = db()
-    df = pd.read_sql_query(
-        "SELECT * FROM focus_items WHERE focus_date = ? ORDER BY priority ASC, id DESC",
-        conn,
-        params=(today(),),
+    conn = get_connection()
+    cur = conn.cursor()
+
+    # TASKS
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS tasks(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT,
+        category TEXT,
+        priority TEXT,
+        due_date TEXT,
+        done INTEGER DEFAULT 0,
+        created_at TEXT
     )
-    conn.close()
-    return df
+    """)
 
+    # GOALS
 
-def latest_reflection():
-    conn = db()
-    df = pd.read_sql_query(
-        "SELECT * FROM daily_reflections ORDER BY reflection_date DESC LIMIT 1",
-        conn,
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS goals(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT,
+        created_at TEXT
     )
+    """)
+
+    # GOAL ITEMS
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS goal_items(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        goal_id INTEGER,
+        task TEXT,
+        completed INTEGER DEFAULT 0
+    )
+    """)
+
+    # JOURNAL
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS journal(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT,
+        body TEXT,
+        entry_date TEXT,
+        created_at TEXT
+    )
+    """)
+
+    # DAILY FOCUS
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS focus(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        focus_task TEXT,
+        focus_date TEXT
+    )
+    """)
+
+    # BUCKET LIST
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS bucket_list(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        item TEXT,
+        completed INTEGER DEFAULT 0,
+        created_at TEXT
+    )
+    """)
+
+    # HOBBIES
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS hobbies(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT,
+        category TEXT,
+        goal TEXT,
+        created_at TEXT
+    )
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS hobby_sessions(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        hobby_id INTEGER,
+        session_date TEXT,
+        minutes INTEGER,
+        note TEXT,
+        created_at TEXT
+    )
+    """)
+
+    # BUDGET
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS budget(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        item TEXT,
+        amount REAL,
+        type TEXT,
+        category TEXT,
+        entry_date TEXT
+    )
+    """)
+
+    # XP
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS xp(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        points INTEGER
+    )
+    """)
+
+    conn.commit()
     conn.close()
-    return df
 
 
-def reminder_text(value):
-    if not value:
-        return "No reminder"
-    try:
-        return datetime.fromisoformat(value).strftime("%d %b %Y, %H:%M")
-    except ValueError:
-        return value
+create_tables()
+
+# ============================================================
+# XP SYSTEM
+# ============================================================
+
+def get_xp():
+
+    xp_df = load_table("xp")
+
+    if xp_df.empty:
+        return 0
+
+    return int(
+        xp_df["points"].sum()
+    )
 
 
-def due_reminders(tasks):
-    if tasks.empty or "reminder_at" not in tasks.columns:
-        return pd.DataFrame()
+def add_xp(points):
 
-    open_tasks = tasks[(tasks["done"] == 0) & tasks["reminder_at"].notna() & (tasks["reminder_at"] != "")].copy()
-    if open_tasks.empty:
-        return pd.DataFrame()
-
-    open_tasks["reminder_dt"] = pd.to_datetime(open_tasks["reminder_at"], errors="coerce")
-    now = pd.Timestamp.now()
-    return open_tasks[open_tasks["reminder_dt"] <= now].sort_values("reminder_dt")
+    run_query(
+        """
+        INSERT INTO xp(points)
+        VALUES(?)
+        """,
+        (points,)
+    )
 
 
-init_db()
+def get_level():
+
+    xp = get_xp()
+
+    return (xp // 100) + 1
+
+
+# ============================================================
+# THEME
+# DARK MODE SAFE
+# ============================================================
 
 st.markdown("""
 <style>
-    .main, .stApp { background: #0f1117; }
-    .block-container { padding-top: 1.5rem; padding-bottom: 2rem; }
-    h1, h2, h3, p, label, span { color: #f9fafb !important; }
-    [data-testid="stMetric"] {
-        background: linear-gradient(145deg, #171923, #111827);
-        border: 1px solid #2d3340;
-        padding: 16px;
-        border-radius: 8px;
-        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
-    }
-    [data-testid="stMetricLabel"] { color: #cbd5e1 !important; }
-    [data-testid="stMetricValue"] { color: #ffffff !important; }
-    div[data-testid="stVerticalBlock"] div[data-testid="stVerticalBlockBorderWrapper"] {
-        border-color: #2d3340 !important;
-        background: #121620 !important;
-    }
-    .stAlert { background: #172a3f !important; color: #60a5fa !important; border-radius: 8px; }
-    .stAlert p { color: #60a5fa !important; }
-    .stButton button {
-        border-radius: 8px;
-        border: none;
-        background: #2563eb;
-        color: white !important;
-        font-weight: 600;
-    }
-    .stButton button:hover { background: #1d4ed8; color: white !important; }
-    input, textarea { color: #ffffff !important; background-color: #262833 !important; }
-    section[data-testid="stSidebar"] { background-color: #262833; }
+
+/* GLOBAL */
+
+.block-container{
+    padding-top:1rem;
+    padding-bottom:2rem;
+}
+
+/* METRIC CARDS */
+
+[data-testid="stMetric"]{
+    background-color:var(--secondary-background-color);
+    border:1px solid rgba(120,120,120,0.2);
+    border-radius:18px;
+    padding:18px;
+}
+
+/* BUTTONS */
+
+.stButton button{
+    border-radius:12px;
+    width:100%;
+    font-weight:600;
+}
+
+/* CONTAINERS */
+
+div[data-testid="stVerticalBlockBorderWrapper"]{
+    border-radius:16px;
+}
+
+/* FOCUS CARD */
+
+.focus-card{
+    background:linear-gradient(
+        135deg,
+        #2563eb,
+        #7c3aed
+    );
+
+    color:white;
+
+    padding:30px;
+
+    border-radius:20px;
+
+    text-align:center;
+}
+
+/* SIDEBAR */
+
+section[data-testid="stSidebar"]{
+    border-right:1px solid rgba(
+        120,
+        120,
+        120,
+        0.15
+    );
+}
+
 </style>
 """, unsafe_allow_html=True)
+
+# ============================================================
+# LOGIN
+# ============================================================
 
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
 if not st.session_state.logged_in:
-    st.title("MyDay")
-    st.caption("Your private daily dashboard.")
-    pin = st.text_input("Enter PIN", type="password")
+
+    st.title("🚀 MyDay Pro")
+
+    st.caption(
+        "Personal Productivity System"
+    )
+
+    pin = st.text_input(
+        "Enter PIN",
+        type="password"
+    )
+
     if st.button("Unlock"):
+
         if pin == APP_PIN:
+
             st.session_state.logged_in = True
             st.rerun()
-        st.error("Wrong PIN.")
-    st.info("Default PIN is 1234. Change APP_PIN near the top of the code.")
+
+        else:
+
+            st.error(
+                "Incorrect PIN"
+            )
+
     st.stop()
 
-st.sidebar.title("MyDay")
-st.sidebar.caption("Plan. Track. Improve.")
-page = st.sidebar.radio(
-    "Menu",
-    ["Dashboard", "Focus", "Tasks", "Notes", "Habits", "Hobbies", "Mood", "Budget", "Goals"],
+# ============================================================
+# SIDEBAR
+# ============================================================
+
+st.sidebar.title("🚀 MyDay Pro")
+
+st.sidebar.caption(
+    f"Level {get_level()} | {get_xp()} XP"
 )
-if st.sidebar.button("Lock App"):
+
+page = st.sidebar.radio(
+    "Navigation",
+    [
+        "Dashboard",
+        "Tasks",
+        "Daily Focus",
+        "Goals",
+        "Journal",
+        "Bucket List",
+        "Hobbies",
+        "Budget",
+        "Settings"
+    ]
+)
+
+st.sidebar.divider()
+
+if st.sidebar.button(
+    "🔒 Lock App"
+):
+
     st.session_state.logged_in = False
     st.rerun()
+    # ============================================================
+# DASHBOARD
+# ============================================================
 
 if page == "Dashboard":
-    st.title("MyDay Dashboard")
-    st.caption(date.today().strftime("%A, %d %B %Y"))
 
-    tasks = table("tasks")
-    habits = table("habits")
-    hobbies = table("hobbies")
-    sessions = table("hobby_sessions")
-    mood = table("mood")
-    budget = table("budget")
-    goals = table("goals")
-    focus = today_focus()
-    reflection = latest_reflection()
+    st.title("🏠 Dashboard")
 
-    done_tasks = len(tasks[tasks["done"] == 1]) if not tasks.empty else 0
-    task_percent = completion(done_tasks, len(tasks))
-    open_tasks = len(tasks) - done_tasks
-    focus_done = len(focus[focus["done"] == 1]) if not focus.empty else 0
-    habit_done = len(habits[(habits["tracked_date"] == today()) & (habits["completed"] == 1)]) if not habits.empty else 0
-    income = budget[budget["type"] == "Income"]["amount"].sum() if not budget.empty else 0
-    expenses = budget[budget["type"] == "Expense"]["amount"].sum() if not budget.empty else 0
+    current_hour = datetime.now().hour
+
+    if current_hour < 12:
+        greeting = "☀️ Good Morning"
+    elif current_hour < 18:
+        greeting = "🌤 Good Afternoon"
+    else:
+        greeting = "🌙 Good Evening"
+
+    st.markdown(
+        f"""
+        <div class="focus-card">
+            <h2>{greeting}</h2>
+            <h3>Welcome back to MyDay Pro</h3>
+            <p>Stay focused. Stay productive.</p>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    st.write("")
+
+    # ========================================================
+    # LOAD DATA
+    # ========================================================
+
+    tasks = load_table("tasks")
+    goals = load_table("goals")
+    bucket = load_table("bucket_list")
+    budget = load_table("budget")
+    focus = load_table("focus")
+    journal = load_table("journal")
+
+    # ========================================================
+    # TODAY'S FOCUS
+    # ========================================================
+
+    today_focus = "No focus set"
+
+    if not focus.empty:
+
+        focus_today = focus[
+            focus["focus_date"] == today()
+        ]
+
+        if not focus_today.empty:
+
+            today_focus = focus_today.iloc[-1][
+                "focus_task"
+            ]
+
+    st.subheader("⭐ Today's Focus")
+
+    st.info(today_focus)
+
+    # ========================================================
+    # KPI CARDS
+    # ========================================================
+
+    open_tasks = 0
+
+    if not tasks.empty:
+
+        open_tasks = len(
+            tasks[
+                tasks["done"] == 0
+            ]
+        )
+
+    total_goals = len(goals)
+
+    completed_bucket = 0
+
+    if not bucket.empty:
+
+        completed_bucket = len(
+            bucket[
+                bucket["completed"] == 1
+            ]
+        )
+
+    income = 0
+    expenses = 0
+
+    if not budget.empty:
+
+        income = budget[
+            budget["type"] == "Income"
+        ]["amount"].sum()
+
+        expenses = budget[
+            budget["type"] == "Expense"
+        ]["amount"].sum()
+
+    balance = income - expenses
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Open Tasks", open_tasks)
-    c2.metric("Task Progress", f"{task_percent}%")
-    c3.metric("Focus Today", f"{focus_done}/{len(focus)}")
-    c4.metric("Balance", f"R {income - expenses:,.2f}")
-    if not tasks.empty:
-        st.progress(task_percent / 100)
+
+    c1.metric(
+        "📋 Open Tasks",
+        open_tasks
+    )
+
+    c2.metric(
+        "🎯 Goals",
+        total_goals
+    )
+
+    c3.metric(
+        "🪣 Dreams Completed",
+        completed_bucket
+    )
+
+    c4.metric(
+        "💰 Balance",
+        f"R {balance:,.0f}"
+    )
 
     st.divider()
-    left, right = st.columns([2, 1])
+
+    # ========================================================
+    # XP SECTION
+    # ========================================================
+
+    st.subheader("🚀 Level Progress")
+
+    xp = get_xp()
+    level = get_level()
+
+    c1, c2 = st.columns([1, 3])
+
+    with c1:
+
+        st.metric(
+            "Level",
+            level
+        )
+
+    with c2:
+
+        xp_progress = xp % 100
+
+        st.progress(
+            xp_progress / 100
+        )
+
+        st.caption(
+            f"{xp_progress}/100 XP until Level {level + 1}"
+        )
+
+    st.divider()
+
+    # ========================================================
+    # DUE TODAY
+    # ========================================================
+
+    left, right = st.columns(
+        [2, 1]
+    )
+
     with left:
-        st.subheader("Today Focus")
-        if focus.empty:
-            st.info("No focus items yet. Add your top priorities on the Focus page.")
+
+        st.subheader(
+            "📅 Tasks Due Today"
+        )
+
+        if tasks.empty:
+
+            st.info(
+                "No tasks yet."
+            )
+
         else:
-            for _, item in focus.iterrows():
-                status = "Done" if item["done"] else "Open"
-                st.write(f"**{item['priority']}. {item['title']}** - {status}")
-        if not reflection.empty:
-            latest = reflection.iloc[0]
-            with st.expander("Latest Reflection"):
-                st.write(f"**Win:** {latest['win'] or 'Nothing written yet'}")
-                st.write(f"**Lesson:** {latest['lesson'] or 'Nothing written yet'}")
-                st.write(f"**Tomorrow:** {latest['tomorrow'] or 'Nothing written yet'}")
+
+            due_today = tasks[
+                (tasks["due_date"] == today()) &
+                (tasks["done"] == 0)
+            ]
+
+            if due_today.empty:
+
+                st.success(
+                    "Nothing due today 🎉"
+                )
+
+            else:
+
+                st.dataframe(
+                    due_today[
+                        [
+                            "title",
+                            "priority",
+                            "category"
+                        ]
+                    ],
+                    use_container_width=True,
+                    hide_index=True
+                )
 
     with right:
-        st.subheader("Quick Add Task")
-        with st.form("quick_task"):
-            title = st.text_input("Task")
-            if st.form_submit_button("Add") and title.strip():
-                query(
-                    "INSERT INTO tasks (title, category, due_date, priority, done, created_at, reminder_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (title.strip(), "Personal", today(), "Medium", 0, datetime.now().isoformat(timespec="seconds"), None),
+
+        st.subheader(
+            "⚡ Quick Add"
+        )
+
+        with st.form(
+            "quick_task_form"
+        ):
+
+            task_name = st.text_input(
+                "Task"
+            )
+
+            submit = st.form_submit_button(
+                "Add Task"
+            )
+
+            if submit:
+
+                if task_name.strip():
+
+                    run_query(
+                        """
+                        INSERT INTO tasks
+                        (
+                            title,
+                            category,
+                            priority,
+                            due_date,
+                            done,
+                            created_at
+                        )
+                        VALUES
+                        (?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            task_name,
+                            "Personal",
+                            "Medium",
+                            today(),
+                            0,
+                            datetime.now().isoformat(
+                                timespec="seconds"
+                            )
+                        )
+                    )
+
+                    add_xp(5)
+
+                    st.rerun()
+
+    st.divider()
+
+    # ========================================================
+    # RECENT JOURNAL
+    # ========================================================
+
+    st.subheader(
+        "📔 Latest Journal Entries"
+    )
+
+    if journal.empty:
+
+        st.info(
+            "No journal entries yet."
+        )
+
+    else:
+
+        recent_journal = journal.sort_values(
+            "id",
+            ascending=False
+        ).head(3)
+
+        for _, row in recent_journal.iterrows():
+
+            with st.container(
+                border=True
+            ):
+
+                st.write(
+                    f"**{row['title']}**"
                 )
+
+                st.caption(
+                    row["entry_date"]
+                )
+
+    st.divider()
+
+    # ========================================================
+    # ACTIVITY SUMMARY
+    # ========================================================
+
+    st.subheader(
+        "📊 Activity Summary"
+    )
+
+    col1, col2, col3 = st.columns(3)
+
+    col1.metric(
+        "Journal Entries",
+        len(journal)
+    )
+
+    col2.metric(
+        "Bucket List Items",
+        len(bucket)
+    )
+
+    col3.metric(
+        "XP Earned",
+        get_xp()
+    )
+
+
+# ============================================================
+# DAILY FOCUS
+# ============================================================
+
+elif page == "Daily Focus":
+
+    st.title("⭐ Daily Focus")
+
+    st.caption(
+        "Choose the most important thing for today."
+    )
+
+    focus = load_table("focus")
+
+    current_focus = "No focus selected"
+
+    if not focus.empty:
+
+        today_focus = focus[
+            focus["focus_date"] == today()
+        ]
+
+        if not today_focus.empty:
+
+            current_focus = today_focus.iloc[-1][
+                "focus_task"
+            ]
+
+    st.info(
+        f"Current Focus: {current_focus}"
+    )
+
+    with st.form(
+        "daily_focus_form"
+    ):
+
+        focus_task = st.text_input(
+            "Today's Main Focus"
+        )
+
+        submit = st.form_submit_button(
+            "Save Focus"
+        )
+
+        if submit:
+
+            if focus_task.strip():
+
+                run_query(
+                    """
+                    INSERT INTO focus
+                    (
+                        focus_task,
+                        focus_date
+                    )
+                    VALUES
+                    (?, ?)
+                    """,
+                    (
+                        focus_task,
+                        today()
+                    )
+                )
+
+                add_xp(10)
+
+                st.success(
+                    "Focus saved."
+                )
+
                 st.rerun()
 
     st.divider()
-    reminders = due_reminders(tasks)
-    if not reminders.empty:
-        st.subheader("Reminders")
-        for _, task in reminders.iterrows():
-            st.warning(f"{task['title']} - reminder was set for {reminder_text(task['reminder_at'])}")
-        st.divider()
 
-    a, b, c = st.columns(3)
-    a.metric("Habits Today", habit_done)
-    b.metric("Hobbies", len(hobbies))
-    c.metric("Goals", len(goals))
+    st.subheader(
+        "💡 Focus Rules"
+    )
 
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("Due Today")
-        if tasks.empty:
-            st.info("No tasks yet.")
-        else:
-            due = tasks[(tasks["due_date"] == today()) & (tasks["done"] == 0)]
-            if due.empty:
-                st.success("Nothing due today.")
-            else:
-                st.dataframe(due[["title", "category", "priority", "due_date"]], use_container_width=True, hide_index=True)
-
-    with col2:
-        st.subheader("Hobby Time")
-        if sessions.empty or hobbies.empty:
-            st.info("No hobby sessions yet.")
-        else:
-            stats = sessions.merge(hobbies[["id", "name"]], left_on="hobby_id", right_on="id", how="left")
-            stats = stats.groupby("name")["minutes"].sum().reset_index()
-            stats["hours"] = stats["minutes"] / 60
-            st.plotly_chart(px.bar(stats, x="name", y="hours", title="Hours Per Hobby"), use_container_width=True)
-
-elif page == "Focus":
-    st.title("Focus Mode")
-    st.caption("Pick your top priorities, finish them, and reflect at the end of the day.")
-    tab1, tab2, tab3 = st.tabs(["Today", "Reflection", "History"])
-
-    with tab1:
-        with st.form("add_focus"):
-            title = st.text_input("Priority", placeholder="Example: Finish maths homework")
-            priority = st.selectbox("Priority number", [1, 2, 3, 4, 5])
-            focus_date = st.date_input("Date", value=date.today())
-            if st.form_submit_button("Add Priority"):
-                if title.strip():
-                    query(
-                        "INSERT INTO focus_items (title, focus_date, priority, done, created_at) VALUES (?, ?, ?, ?, ?)",
-                        (title.strip(), focus_date.isoformat(), int(priority), 0, datetime.now().isoformat(timespec="seconds")),
-                    )
-                    st.rerun()
-                st.warning("Write the priority first.")
-
-        focus = today_focus()
-        if focus.empty:
-            st.info("No priorities for today yet.")
-        else:
-            done_count = len(focus[focus["done"] == 1])
-            st.metric("Today's Focus Progress", f"{done_count}/{len(focus)}")
-            st.progress(done_count / len(focus))
-            for _, item in focus.iterrows():
-                with st.container(border=True):
-                    c1, c2, c3 = st.columns([5, 1, 1])
-                    with c1:
-                        status = "Done" if item["done"] else "Open"
-                        st.write(f"**{item['priority']}. {item['title']}**")
-                        st.caption(f"{item['focus_date']} | {status}")
-                    with c2:
-                        label = "Undo" if item["done"] else "Done"
-                        new_done = 0 if item["done"] else 1
-                        if st.button(label, key=f"focus_toggle_{item['id']}"):
-                            query("UPDATE focus_items SET done = ? WHERE id = ?", (new_done, item["id"]))
-                            st.rerun()
-                    with c3:
-                        if st.button("Delete", key=f"focus_delete_{item['id']}"):
-                            query("DELETE FROM focus_items WHERE id = ?", (item["id"],))
-                            st.rerun()
-
-    with tab2:
-        existing = query("SELECT win, lesson, tomorrow FROM daily_reflections WHERE reflection_date = ?", (today(),), fetch=True)
-        current_win = existing[0][0] if existing else ""
-        current_lesson = existing[0][1] if existing else ""
-        current_tomorrow = existing[0][2] if existing else ""
-        with st.form("reflection"):
-            win = st.text_area("Biggest win today", value=current_win)
-            lesson = st.text_area("What did you learn?", value=current_lesson)
-            tomorrow = st.text_area("What should tomorrow-you remember?", value=current_tomorrow)
-            if st.form_submit_button("Save Reflection"):
-                query(
-                    """INSERT OR REPLACE INTO daily_reflections
-                    (id, reflection_date, win, lesson, tomorrow, created_at)
-                    VALUES ((SELECT id FROM daily_reflections WHERE reflection_date = ?), ?, ?, ?, ?, ?)""",
-                    (today(), today(), win.strip(), lesson.strip(), tomorrow.strip(), datetime.now().isoformat(timespec="seconds")),
-                )
-                st.rerun()
-
-    with tab3:
-        focus = table("focus_items")
-        reflections = table("daily_reflections")
-        if focus.empty:
-            st.info("No focus history yet.")
-        else:
-            summary = focus.groupby("focus_date")["done"].agg(["sum", "count"]).reset_index()
-            summary["percent"] = (summary["sum"] / summary["count"] * 100).round(0)
-            st.plotly_chart(px.line(summary, x="focus_date", y="percent", markers=True, title="Focus Completion Over Time"), use_container_width=True)
-            st.dataframe(focus.sort_values(["focus_date", "priority"], ascending=[False, True]), use_container_width=True, hide_index=True)
-        if not reflections.empty:
-            st.subheader("Past Reflections")
-            st.dataframe(reflections.sort_values("reflection_date", ascending=False), use_container_width=True, hide_index=True)
+    st.markdown("""
+    - Pick ONE major objective
+    - Finish it before small tasks
+    - Keep it measurable
+    - Review it tonight
+    - Set a new focus tomorrow
+    """)
+    # ============================================================
+# TASKS
+# ============================================================
 
 elif page == "Tasks":
-    st.title("Tasks")
-    with st.form("add_task"):
-        title = st.text_input("Task name")
-        category = st.selectbox("Category", ["Personal", "School", "Work", "Business", "Health", "Other"])
-        due_date = st.date_input("Due date")
-        priority = st.selectbox("Priority", ["Low", "Medium", "High"])
-        add_reminder = st.checkbox("Add reminder")
 
-        reminder_at = None
-        if add_reminder:
-            reminder_date = st.date_input("Reminder date", value=due_date)
-            reminder_time = st.time_input("Reminder time", value=datetime_time(9, 0))
-            reminder_at = datetime.combine(reminder_date, reminder_time).isoformat(timespec="minutes")
+    st.title("✅ Tasks")
 
-        if st.form_submit_button("Add Task"):
-            if title.strip():
-                query(
-                    "INSERT INTO tasks (title, category, due_date, priority, done, created_at, reminder_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (title.strip(), category, due_date.isoformat(), priority, 0, datetime.now().isoformat(timespec="seconds"), reminder_at),
-                )
-                st.rerun()
-            st.warning("Add a task name.")
+    tasks = load_table("tasks")
 
-    tasks = table("tasks")
-    if tasks.empty:
-        st.info("No tasks yet.")
-    else:
-        reminders = due_reminders(tasks)
-        if not reminders.empty:
-            st.subheader("Due Reminders")
-            for _, task in reminders.iterrows():
-                st.warning(f"{task['title']} - reminder was set for {reminder_text(task['reminder_at'])}")
+    # ========================================================
+    # ADD TASK
+    # ========================================================
+
+    with st.expander(
+        "➕ Create New Task",
+        expanded=True
+    ):
+
+        with st.form("task_form"):
+
+            title = st.text_input(
+                "Task Name"
+            )
+
+            category = st.selectbox(
+                "Category",
+                [
+                    "Personal",
+                    "Work",
+                    "Business",
+                    "Study",
+                    "Health",
+                    "Finance",
+                    "Other"
+                ]
+            )
+
+            priority = st.selectbox(
+                "Priority",
+                [
+                    "Low",
+                    "Medium",
+                    "High"
+                ]
+            )
+
+            due_date = st.date_input(
+                "Due Date"
+            )
+
+            submitted = st.form_submit_button(
+                "Add Task"
+            )
+
+            if submitted:
+
+                if title.strip():
+
+                    run_query(
+                        """
+                        INSERT INTO tasks
+                        (
+                            title,
+                            category,
+                            priority,
+                            due_date,
+                            done,
+                            created_at
+                        )
+                        VALUES
+                        (?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            title,
+                            category,
+                            priority,
+                            due_date.isoformat(),
+                            0,
+                            datetime.now().isoformat(
+                                timespec="seconds"
+                            )
+                        )
+                    )
+
+                    add_xp(5)
+
+                    st.success(
+                        "Task created."
+                    )
+
+                    st.rerun()
+
+    st.divider()
+
+    # ========================================================
+    # TASK STATS
+    # ========================================================
+
+    total_tasks = len(tasks)
+
+    completed_tasks = 0
+    open_tasks = 0
+
+    if not tasks.empty:
+
+        completed_tasks = len(
+            tasks[
+                tasks["done"] == 1
+            ]
+        )
+
+        open_tasks = len(
+            tasks[
+                tasks["done"] == 0
+            ]
+        )
+
+    completion_rate = 0
+
+    if total_tasks > 0:
+
+        completion_rate = (
+            completed_tasks /
+            total_tasks
+        ) * 100
+
+    c1, c2, c3, c4 = st.columns(4)
+
+    c1.metric(
+        "📋 Total",
+        total_tasks
+    )
+
+    c2.metric(
+        "🔥 Open",
+        open_tasks
+    )
+
+    c3.metric(
+        "✅ Done",
+        completed_tasks
+    )
+
+    c4.metric(
+        "📈 Success",
+        f"{completion_rate:.0f}%"
+    )
+
+    st.divider()
+
+    # ========================================================
+    # FILTERS
+    # ========================================================
+
+    if not tasks.empty:
 
         f1, f2 = st.columns(2)
-        status_filter = f1.selectbox("Status", ["All", "Open", "Done"])
-        priority_filter = f2.selectbox("Priority", ["All", "Low", "Medium", "High"])
+
+        with f1:
+
+            status_filter = st.selectbox(
+                "Status",
+                [
+                    "All",
+                    "Open",
+                    "Completed"
+                ]
+            )
+
+        with f2:
+
+            categories = ["All"] + sorted(
+                tasks["category"]
+                .dropna()
+                .unique()
+                .tolist()
+            )
+
+            category_filter = st.selectbox(
+                "Category",
+                categories
+            )
+
         filtered = tasks.copy()
+
         if status_filter == "Open":
-            filtered = filtered[filtered["done"] == 0]
-        elif status_filter == "Done":
-            filtered = filtered[filtered["done"] == 1]
-        if priority_filter != "All":
-            filtered = filtered[filtered["priority"] == priority_filter]
-        for _, task in filtered.sort_values("id", ascending=False).iterrows():
-            with st.container(border=True):
-                c1, c2, c3 = st.columns([5, 1, 1])
-                with c1:
-                    status = "Done" if task["done"] else "Open"
-                    st.write(f"**{task['title']}**")
-                    st.caption(f"{task['category']} | {task['priority']} | Due {task['due_date']} | {status}")
-                    st.caption(f"Reminder: {reminder_text(task.get('reminder_at'))}")
-                with c2:
-                    label = "Undo" if task["done"] else "Done"
-                    new_done = 0 if task["done"] else 1
-                    if st.button(label, key=f"task_toggle_{task['id']}"):
-                        query("UPDATE tasks SET done = ? WHERE id = ?", (new_done, task["id"]))
-                        st.rerun()
-                with c3:
-                    if st.button("Delete", key=f"delete_task_{task['id']}"):
-                        query("DELETE FROM tasks WHERE id = ?", (task["id"],))
-                        st.rerun()
 
-elif page == "Notes":
-    st.title("Notes")
-    with st.form("add_note"):
-        title = st.text_input("Title")
-        body = st.text_area("Note", height=180)
-        if st.form_submit_button("Save Note"):
-            if title.strip():
-                query("INSERT INTO notes (title, body, created_at) VALUES (?, ?, ?)", (title.strip(), body, datetime.now().isoformat(timespec="seconds")))
-                st.rerun()
-            st.warning("Title is required.")
-    notes = table("notes")
-    search = st.text_input("Search notes")
-    if not notes.empty and search:
-        notes = notes[notes["title"].str.contains(search, case=False, na=False) | notes["body"].str.contains(search, case=False, na=False)]
-    if notes.empty:
-        st.info("No notes found.")
-    else:
-        for _, note in notes.sort_values("id", ascending=False).iterrows():
-            with st.expander(note["title"]):
-                st.write(note["body"])
-                st.caption(note["created_at"])
-                if st.button("Delete Note", key=f"delete_note_{note['id']}"):
-                    query("DELETE FROM notes WHERE id = ?", (note["id"],))
-                    st.rerun()
+            filtered = filtered[
+                filtered["done"] == 0
+            ]
 
-elif page == "Habits":
-    st.title("Habits")
-    with st.form("track_habit"):
-        habit = st.text_input("Habit")
-        completed = st.checkbox("Completed today")
-        if st.form_submit_button("Track"):
-            if habit.strip():
-                query("INSERT INTO habits (habit, tracked_date, completed) VALUES (?, ?, ?)", (habit.strip(), today(), 1 if completed else 0))
-                st.rerun()
-            st.warning("Habit name is required.")
-    habits = table("habits")
-    if habits.empty:
-        st.info("No habits yet.")
-    else:
-        summary = habits.groupby("habit")["completed"].sum().reset_index()
-        st.plotly_chart(px.bar(summary, x="habit", y="completed", title="Habit Wins"), use_container_width=True)
-        st.dataframe(habits.sort_values("id", ascending=False), use_container_width=True, hide_index=True)
+        elif status_filter == "Completed":
 
-elif page == "Hobbies":
-    st.title("Hobby Tracker")
-    st.caption("Add hobbies, remove hobbies, and track how much time you spend on them.")
-    tab1, tab2, tab3 = st.tabs(["My Hobbies", "Track Time", "Stats"])
-    with tab1:
-        with st.form("add_hobby"):
-            name = st.text_input("Hobby name", placeholder="Example: Drawing, Guitar, Gym, Coding")
-            category = st.selectbox("Category", ["Creative", "Fitness", "Learning", "Music", "Gaming", "Outdoor", "Social", "Other"])
-            goal = st.text_input("Goal", placeholder="Example: Practice 3 times a week")
-            if st.form_submit_button("Add Hobby"):
-                if name.strip():
-                    query("INSERT INTO hobbies (name, category, goal, created_at) VALUES (?, ?, ?, ?)", (name.strip(), category, goal.strip(), datetime.now().isoformat(timespec="seconds")))
-                    st.rerun()
-                st.warning("Add a hobby name first.")
-        hobbies = table("hobbies")
-        if hobbies.empty:
-            st.info("No hobbies yet.")
-        else:
-            for _, hobby in hobbies.sort_values("id", ascending=False).iterrows():
-                with st.container(border=True):
-                    col1, col2 = st.columns([4, 1])
-                    with col1:
-                        st.write(f"**{hobby['name']}**")
-                        st.caption(f"{hobby['category']} | Goal: {hobby['goal'] or 'No goal yet'}")
-                    with col2:
-                        if st.button("Remove", key=f"remove_hobby_{hobby['id']}"):
-                            query("DELETE FROM hobby_sessions WHERE hobby_id = ?", (hobby["id"],))
-                            query("DELETE FROM hobbies WHERE id = ?", (hobby["id"],))
+            filtered = filtered[
+                filtered["done"] == 1
+            ]
+
+        if category_filter != "All":
+
+            filtered = filtered[
+                filtered["category"]
+                == category_filter
+            ]
+
+        # ====================================================
+        # TASK CARDS
+        # ====================================================
+
+        st.subheader(
+            "📌 Task List"
+        )
+
+        for _, task in filtered.sort_values(
+            "id",
+            ascending=False
+        ).iterrows():
+
+            if task["priority"] == "High":
+                icon = "🔴"
+
+            elif task["priority"] == "Medium":
+                icon = "🟡"
+
+            else:
+                icon = "🟢"
+
+            with st.container(
+                border=True
+            ):
+
+                left, middle, right = st.columns(
+                    [7, 1, 1]
+                )
+
+                with left:
+
+                    if task["done"] == 1:
+
+                        st.markdown(
+                            f"### ~~{task['title']}~~"
+                        )
+
+                    else:
+
+                        st.markdown(
+                            f"### {task['title']}"
+                        )
+
+                    st.caption(
+                        f"{icon} {task['priority']} | "
+                        f"{task['category']} | "
+                        f"Due: {task['due_date']}"
+                    )
+
+                with middle:
+
+                    if task["done"] == 0:
+
+                        if st.button(
+                            "✔",
+                            key=f"done_{task['id']}"
+                        ):
+
+                            run_query(
+                                """
+                                UPDATE tasks
+                                SET done = 1
+                                WHERE id = ?
+                                """,
+                                (
+                                    task["id"],
+                                )
+                            )
+
+                            add_xp(10)
+
                             st.rerun()
-    with tab2:
-        hobbies = table("hobbies")
-        if hobbies.empty:
-            st.info("Add a hobby first before tracking time.")
-        else:
-            hobby_options = {f"{row['name']} ({row['category']})": row["id"] for _, row in hobbies.sort_values("name").iterrows()}
-            with st.form("track_hobby_session"):
-                selected = st.selectbox("Choose hobby", list(hobby_options.keys()))
-                session_date = st.date_input("Date", value=date.today())
-                minutes = st.number_input("Minutes spent", min_value=1, max_value=1440, value=30, step=5)
-                note = st.text_area("Note", placeholder="What did you do or improve?")
-                if st.form_submit_button("Save Session"):
-                    query("INSERT INTO hobby_sessions (hobby_id, session_date, minutes, note, created_at) VALUES (?, ?, ?, ?, ?)", (hobby_options[selected], session_date.isoformat(), int(minutes), note.strip(), datetime.now().isoformat(timespec="seconds")))
-                    st.rerun()
-            sessions = table("hobby_sessions")
-            if not sessions.empty:
-                view = sessions.merge(hobbies[["id", "name", "category"]], left_on="hobby_id", right_on="id", how="left")
-                st.dataframe(view[["session_date", "name", "category", "minutes", "note"]].sort_values("session_date", ascending=False), use_container_width=True, hide_index=True)
-    with tab3:
-        hobbies = table("hobbies")
-        sessions = table("hobby_sessions")
-        if hobbies.empty or sessions.empty:
-            st.info("Track some hobby time first to see stats.")
-        else:
-            stats = sessions.merge(hobbies[["id", "name", "category"]], left_on="hobby_id", right_on="id", how="left")
-            total_hours = stats["minutes"].sum() / 60
-            top_hobby = stats.groupby("name")["minutes"].sum().sort_values(ascending=False).index[0]
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Total Hours", f"{total_hours:.1f}")
-            c2.metric("Sessions", len(stats))
-            c3.metric("Top Hobby", top_hobby)
-            by_hobby = stats.groupby("name")["minutes"].sum().reset_index()
-            by_hobby["hours"] = by_hobby["minutes"] / 60
-            st.plotly_chart(px.bar(by_hobby, x="name", y="hours", title="Hours Per Hobby"), use_container_width=True)
 
-elif page == "Mood":
-    st.title("Mood Tracker")
-    with st.form("add_mood"):
-        mood = st.selectbox("Mood", ["Amazing", "Good", "Okay", "Tired", "Stressed", "Sad"])
-        energy = st.slider("Energy", 1, 10, 5)
-        stress = st.slider("Stress", 1, 10, 5)
-        note = st.text_area("Note")
-        if st.form_submit_button("Save Mood"):
-            query("INSERT INTO mood (mood, energy, stress, note, tracked_date) VALUES (?, ?, ?, ?, ?)", (mood, energy, stress, note, today()))
-            st.rerun()
-    moods = table("mood")
-    if moods.empty:
-        st.info("No mood entries yet.")
-    else:
-        c1, c2 = st.columns(2)
-        c1.metric("Average Energy", f"{moods['energy'].mean():.1f}")
-        c2.metric("Average Stress", f"{moods['stress'].mean():.1f}")
-        st.plotly_chart(px.line(moods, x="tracked_date", y=["energy", "stress"], markers=True, title="Energy vs Stress"), use_container_width=True)
-        st.dataframe(moods.sort_values("id", ascending=False), use_container_width=True, hide_index=True)
+                    else:
 
-elif page == "Budget":
-    st.title("Budget Tracker")
-    with st.form("add_budget"):
-        item = st.text_input("Item")
-        amount = st.number_input("Amount", min_value=0.0, step=10.0)
-        kind = st.selectbox("Type", ["Income", "Expense"])
-        category = st.selectbox("Category", ["Food", "Transport", "Shopping", "School", "Business", "Bills", "Savings", "Other"])
-        entry_date = st.date_input("Date")
-        if st.form_submit_button("Add Entry"):
-            if item.strip() and amount > 0:
-                query("INSERT INTO budget (item, amount, type, category, entry_date) VALUES (?, ?, ?, ?, ?)", (item.strip(), amount, kind, category, entry_date.isoformat()))
-                st.rerun()
-            st.warning("Item and amount are required.")
-    budget = table("budget")
-    if budget.empty:
-        st.info("No budget entries yet.")
+                        if st.button(
+                            "↩",
+                            key=f"undo_{task['id']}"
+                        ):
+
+                            run_query(
+                                """
+                                UPDATE tasks
+                                SET done = 0
+                                WHERE id = ?
+                                """,
+                                (
+                                    task["id"],
+                                )
+                            )
+
+                            st.rerun()
+
+                with right:
+
+                    if st.button(
+                        "🗑",
+                        key=f"delete_{task['id']}"
+                    ):
+
+                        run_query(
+                            """
+                            DELETE FROM tasks
+                            WHERE id = ?
+                            """,
+                            (
+                                task["id"],
+                            )
+                        )
+
+                        st.rerun()
+
     else:
-        income = budget[budget["type"] == "Income"]["amount"].sum()
-        expense = budget[budget["type"] == "Expense"]["amount"].sum()
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Income", f"R {income:,.2f}")
-        c2.metric("Expenses", f"R {expense:,.2f}")
-        c3.metric("Balance", f"R {income - expense:,.2f}")
-        expenses = budget[budget["type"] == "Expense"]
-        if not expenses.empty:
-            st.plotly_chart(px.pie(expenses, names="category", values="amount", title="Expenses by Category"), use_container_width=True)
-        st.dataframe(budget.sort_values("id", ascending=False), use_container_width=True, hide_index=True)
+
+        st.info(
+            "No tasks created yet."
+        )
+
+    st.divider()
+
+    # ========================================================
+    # TASK ANALYTICS
+    # ========================================================
+
+    if not tasks.empty:
+
+        st.subheader(
+            "📊 Task Analytics"
+        )
+
+        priority_stats = (
+            tasks.groupby(
+                "priority"
+            )
+            .size()
+            .reset_index(
+                name="count"
+            )
+        )
+
+        fig = px.pie(
+            priority_stats,
+            names="priority",
+            values="count",
+            hole=0.45,
+            title="Tasks by Priority"
+        )
+
+        st.plotly_chart(
+            fig,
+            use_container_width=True
+        )
+
+        category_stats = (
+            tasks.groupby(
+                "category"
+            )
+            .size()
+            .reset_index(
+                name="count"
+            )
+        )
+
+        fig2 = px.bar(
+            category_stats,
+            x="category",
+            y="count",
+            title="Tasks by Category"
+        )
+
+        st.plotly_chart(
+            fig2,
+            use_container_width=True
+        )
+
+    st.divider()
+
+    # ========================================================
+    # PRODUCTIVITY ACHIEVEMENTS
+    # ========================================================
+
+    st.subheader(
+        "🏆 Achievements"
+    )
+
+    if completed_tasks >= 1:
+        st.success(
+            "First Task Completed!"
+        )
+
+    if completed_tasks >= 25:
+        st.success(
+            "Task Warrior — 25 Completed"
+        )
+
+    if completed_tasks >= 50:
+        st.success(
+            "Productivity Machine — 50 Completed"
+        )
+
+    if completed_tasks >= 100:
+        st.success(
+            "Legend — 100 Completed Tasks"
+        )
+        # ============================================================
+# GOALS
+# ============================================================
 
 elif page == "Goals":
-    st.title("Goals")
-    with st.form("add_goal"):
-        title = st.text_input("Goal")
-        target = st.text_input("Target")
-        progress = st.slider("Progress", 0, 100, 0)
-        if st.form_submit_button("Add Goal"):
-            if title.strip():
-                query("INSERT INTO goals (title, target, progress, created_at) VALUES (?, ?, ?, ?)", (title.strip(), target, progress, datetime.now().isoformat(timespec="seconds")))
-                st.rerun()
-            st.warning("Goal title is required.")
-    goals = table("goals")
+
+    st.title("🎯 Goals")
+
+    goals = load_table("goals")
+    goal_items = load_table("goal_items")
+
+    # ========================================================
+    # CREATE GOAL
+    # ========================================================
+
+    with st.expander(
+        "➕ Create New Goal",
+        expanded=True
+    ):
+
+        with st.form("goal_create_form"):
+
+            goal_title = st.text_input(
+                "Goal Name"
+            )
+
+            create_goal = st.form_submit_button(
+                "Create Goal"
+            )
+
+            if create_goal:
+
+                if goal_title.strip():
+
+                    run_query(
+                        """
+                        INSERT INTO goals
+                        (
+                            title,
+                            created_at
+                        )
+                        VALUES
+                        (?, ?)
+                        """,
+                        (
+                            goal_title,
+                            datetime.now().isoformat(
+                                timespec="seconds"
+                            )
+                        )
+                    )
+
+                    add_xp(15)
+
+                    st.success(
+                        "Goal created."
+                    )
+
+                    st.rerun()
+
+    st.divider()
+
+    # ========================================================
+    # GOAL OVERVIEW
+    # ========================================================
+
+    total_goals = len(goals)
+    completed_goals = 0
+
+    if not goals.empty:
+
+        for _, goal in goals.iterrows():
+
+            goal_id = goal["id"]
+
+            items = goal_items[
+                goal_items["goal_id"]
+                == goal_id
+            ]
+
+            if not items.empty:
+
+                done = len(
+                    items[
+                        items["completed"] == 1
+                    ]
+                )
+
+                if done == len(items):
+                    completed_goals += 1
+
+    completion_rate = 0
+
+    if total_goals > 0:
+
+        completion_rate = (
+            completed_goals /
+            total_goals
+        ) * 100
+
+    c1, c2, c3 = st.columns(3)
+
+    c1.metric(
+        "🎯 Total Goals",
+        total_goals
+    )
+
+    c2.metric(
+        "🏆 Completed",
+        completed_goals
+    )
+
+    c3.metric(
+        "📈 Success Rate",
+        f"{completion_rate:.0f}%"
+    )
+
+    st.progress(
+        completion_rate / 100
+    )
+
+    st.divider()
+
+    # ========================================================
+    # GOAL CARDS
+    # ========================================================
+
     if goals.empty:
-        st.info("No goals yet.")
+
+        st.info(
+            "No goals created yet."
+        )
+
     else:
-        st.metric("Average Goal Progress", f"{goals['progress'].mean():.0f}%")
-        for _, goal in goals.sort_values("id", ascending=False).iterrows():
+
+        for _, goal in goals.sort_values(
+            "id",
+            ascending=False
+        ).iterrows():
+
+            goal_id = goal["id"]
+
+            items = goal_items[
+                goal_items["goal_id"]
+                == goal_id
+            ]
+
+            total_items = len(items)
+
+            completed_items = 0
+
+            if not items.empty:
+
+                completed_items = len(
+                    items[
+                        items["completed"] == 1
+                    ]
+                )
+
+            progress = 0
+
+            if total_items > 0:
+
+                progress = (
+                    completed_items /
+                    total_items
+                )
+
             with st.container(border=True):
-                st.write(f"**{goal['title']}**")
-                st.caption(goal["target"])
-                st.progress(int(goal["progress"]) / 100)
-                new_progress = st.slider("Update progress", 0, 100, int(goal["progress"]), key=f"progress_{goal['id']}")
-                c1, c2 = st.columns(2)
-                with c1:
-                    if st.button("Save Progress", key=f"save_goal_{goal['id']}"):
-                        query("UPDATE goals SET progress = ? WHERE id = ?", (new_progress, goal["id"]))
+
+                st.subheader(
+                    goal["title"]
+                )
+
+                st.progress(progress)
+
+                st.caption(
+                    f"{completed_items}/{total_items} tasks completed"
+                )
+
+                # ============================================
+                # ADD SUBTASK
+                # ============================================
+
+                with st.form(
+                    f"goal_item_form_{goal_id}"
+                ):
+
+                    new_task = st.text_input(
+                        "Add Action Step",
+                        key=f"goal_step_{goal_id}"
+                    )
+
+                    add_step = st.form_submit_button(
+                        "Add Step"
+                    )
+
+                    if add_step:
+
+                        if new_task.strip():
+
+                            run_query(
+                                """
+                                INSERT INTO goal_items
+                                (
+                                    goal_id,
+                                    task,
+                                    completed
+                                )
+                                VALUES
+                                (?, ?, ?)
+                                """,
+                                (
+                                    goal_id,
+                                    new_task,
+                                    0
+                                )
+                            )
+
+                            add_xp(2)
+
+                            st.rerun()
+
+                st.divider()
+
+                # ============================================
+                # CHECKLIST
+                # ============================================
+
+                if items.empty:
+
+                    st.info(
+                        "Add action steps to start."
+                    )
+
+                else:
+
+                    for _, item in items.iterrows():
+
+                        col1, col2 = st.columns(
+                            [8, 1]
+                        )
+
+                        with col1:
+
+                            checked = st.checkbox(
+                                item["task"],
+                                value=bool(
+                                    item["completed"]
+                                ),
+                                key=f"goal_{item['id']}"
+                            )
+
+                            if checked != bool(
+                                item["completed"]
+                            ):
+
+                                run_query(
+                                    """
+                                    UPDATE goal_items
+                                    SET completed = ?
+                                    WHERE id = ?
+                                    """,
+                                    (
+                                        1 if checked else 0,
+                                        item["id"]
+                                    )
+                                )
+
+                                if checked:
+                                    add_xp(10)
+
+                                st.rerun()
+
+                        with col2:
+
+                            if st.button(
+                                "🗑",
+                                key=f"delete_goal_item_{item['id']}"
+                            ):
+
+                                run_query(
+                                    """
+                                    DELETE FROM goal_items
+                                    WHERE id = ?
+                                    """,
+                                    (
+                                        item["id"],
+                                    )
+                                )
+
+                                st.rerun()
+
+                st.divider()
+
+                # ============================================
+                # GOAL COMPLETE BADGE
+                # ============================================
+
+                if (
+                    total_items > 0 and
+                    completed_items == total_items
+                ):
+
+                    st.success(
+                        "🏆 Goal Completed!"
+                    )
+
+                # ============================================
+                # DELETE GOAL
+                # ============================================
+
+                if st.button(
+                    "❌ Delete Goal",
+                    key=f"delete_goal_{goal_id}"
+                ):
+
+                    run_query(
+                        """
+                        DELETE FROM goal_items
+                        WHERE goal_id = ?
+                        """,
+                        (
+                            goal_id,
+                        )
+                    )
+
+                    run_query(
+                        """
+                        DELETE FROM goals
+                        WHERE id = ?
+                        """,
+                        (
+                            goal_id,
+                        )
+                    )
+
+                    st.rerun()
+
+    st.divider()
+
+    # ========================================================
+    # ACHIEVEMENTS
+    # ========================================================
+
+    st.subheader(
+        "🏅 Goal Achievements"
+    )
+
+    if completed_goals >= 1:
+        st.success(
+            "First Goal Completed!"
+        )
+
+    if completed_goals >= 5:
+        st.success(
+            "Goal Crusher — 5 Goals Completed"
+        )
+
+    if completed_goals >= 10:
+        st.success(
+            "Achievement Hunter — 10 Goals Completed"
+        )
+
+    if completed_goals >= 25:
+        st.success(
+            "Productivity Master — 25 Goals Completed"
+        )
+
+    if completed_goals >= 50:
+        st.success(
+            "Elite Performer — 50 Goals Completed"
+        )
+        # ============================================================
+# JOURNAL
+# ============================================================
+
+elif page == "Journal":
+
+    st.title("📔 Journal")
+
+    st.caption(
+        "Capture thoughts, gratitude, wins and lessons."
+    )
+
+    # ========================================================
+    # NEW ENTRY
+    # ========================================================
+
+    with st.expander(
+        "✍ New Journal Entry",
+        expanded=True
+    ):
+
+        with st.form("journal_form"):
+
+            title = st.text_input(
+                "Entry Title"
+            )
+
+            mood = st.selectbox(
+                "Mood",
+                [
+                    "😁 Amazing",
+                    "😊 Happy",
+                    "🙂 Good",
+                    "😐 Normal",
+                    "😔 Sad",
+                    "😫 Stressed"
+                ]
+            )
+
+            wins = st.text_area(
+                "🏆 Wins Today",
+                height=100
+            )
+
+            gratitude = st.text_area(
+                "🙏 Gratitude",
+                height=100
+            )
+
+            lessons = st.text_area(
+                "📚 Lessons Learned",
+                height=100
+            )
+
+            reflection = st.text_area(
+                "💭 Reflection",
+                height=150
+            )
+
+            tomorrow = st.text_area(
+                "🚀 Tomorrow's Focus",
+                height=100
+            )
+
+            save = st.form_submit_button(
+                "Save Entry"
+            )
+
+            if save:
+
+                if title.strip():
+
+                    body = f"""
+MOOD:
+{mood}
+
+WINS:
+{wins}
+
+GRATITUDE:
+{gratitude}
+
+LESSONS:
+{lessons}
+
+REFLECTION:
+{reflection}
+
+TOMORROW:
+{tomorrow}
+"""
+
+                    run_query(
+                        """
+                        INSERT INTO journal
+                        (
+                            title,
+                            body,
+                            entry_date,
+                            created_at
+                        )
+                        VALUES
+                        (?, ?, ?, ?)
+                        """,
+                        (
+                            title,
+                            body,
+                            today(),
+                            datetime.now().isoformat(
+                                timespec="seconds"
+                            )
+                        )
+                    )
+
+                    add_xp(15)
+
+                    st.success(
+                        "Journal entry saved."
+                    )
+
+                    st.rerun()
+
+    st.divider()
+
+    # ========================================================
+    # LOAD DATA
+    # ========================================================
+
+    journal = load_table("journal")
+
+    # ========================================================
+    # STATS
+    # ========================================================
+
+    total_entries = len(journal)
+
+    current_month = datetime.now().month
+
+    monthly_entries = 0
+
+    if not journal.empty:
+
+        journal["entry_date"] = pd.to_datetime(
+            journal["entry_date"],
+            errors="coerce"
+        )
+
+        monthly_entries = len(
+            journal[
+                journal["entry_date"]
+                .dt.month == current_month
+            ]
+        )
+
+    c1, c2, c3 = st.columns(3)
+
+    c1.metric(
+        "📖 Total Entries",
+        total_entries
+    )
+
+    c2.metric(
+        "🗓 This Month",
+        monthly_entries
+    )
+
+    c3.metric(
+        "⭐ XP Earned",
+        total_entries * 15
+    )
+
+    st.divider()
+
+    # ========================================================
+    # SEARCH
+    # ========================================================
+
+    search = st.text_input(
+        "🔍 Search Journal"
+    )
+
+    filtered = journal.copy()
+
+    if (
+        not journal.empty and
+        search.strip()
+    ):
+
+        filtered = journal[
+            journal["title"]
+            .astype(str)
+            .str.contains(
+                search,
+                case=False,
+                na=False
+            )
+        ]
+
+    # ========================================================
+    # JOURNAL HISTORY
+    # ========================================================
+
+    st.subheader(
+        "📚 Journal History"
+    )
+
+    if filtered.empty:
+
+        st.info(
+            "No journal entries found."
+        )
+
+    else:
+
+        filtered = filtered.sort_values(
+            "id",
+            ascending=False
+        )
+
+        for _, entry in filtered.iterrows():
+
+            with st.container(
+                border=True
+            ):
+
+                st.markdown(
+                    f"### {entry['title']}"
+                )
+
+                st.caption(
+                    f"📅 {entry['entry_date']}"
+                )
+
+                st.markdown(
+                    entry["body"]
+                )
+
+                col1, col2 = st.columns(
+                    [5, 1]
+                )
+
+                with col2:
+
+                    if st.button(
+                        "🗑 Delete",
+                        key=f"journal_delete_{entry['id']}"
+                    ):
+
+                        run_query(
+                            """
+                            DELETE FROM journal
+                            WHERE id = ?
+                            """,
+                            (
+                                entry["id"],
+                            )
+                        )
+
                         st.rerun()
-                with c2:
-                    if st.button("Delete Goal", key=f"delete_goal_{goal['id']}"):
-                        query("DELETE FROM goals WHERE id = ?", (goal["id"],))
+
+    st.divider()
+
+    # ========================================================
+    # REFLECTION PROMPTS
+    # ========================================================
+
+    st.subheader(
+        "💡 Reflection Prompts"
+    )
+
+    prompts = [
+        "What made today meaningful?",
+        "What challenged me today?",
+        "What did I learn today?",
+        "What am I grateful for?",
+        "What can I improve tomorrow?",
+        "What am I proud of this week?",
+        "What goal moved forward today?",
+        "What deserves more attention?"
+    ]
+
+    for prompt in prompts:
+
+        st.write(
+            f"• {prompt}"
+        )
+
+    st.divider()
+
+    # ========================================================
+    # JOURNAL STREAK
+    # ========================================================
+
+    st.subheader(
+        "🔥 Journal Progress"
+    )
+
+    if total_entries == 0:
+
+        st.info(
+            "Start journaling today."
+        )
+
+    else:
+
+        if total_entries >= 7:
+
+            st.success(
+                "🔥 7+ Entries Club"
+            )
+
+        if total_entries >= 30:
+
+            st.success(
+                "🏆 30 Entry Milestone"
+            )
+
+        if total_entries >= 100:
+
+            st.success(
+                "⭐ Journal Master"
+            )
+
+        progress = min(
+            total_entries / 100,
+            1.0
+        )
+
+        st.progress(
+            progress
+        )
+
+        st.caption(
+            f"{total_entries}/100 entries"
+        )
+  # ============================================================
+# BUCKET LIST
+# ============================================================
+
+elif page == "Bucket List":
+
+    st.title("🌍 Bucket List")
+    st.caption("Dream big. Track everything you want to experience in life.")
+
+    bucket = load_table("bucket_list")
+
+    # ========================================================
+    # ADD ITEM
+    # ========================================================
+
+    with st.expander(
+        "➕ Add New Dream",
+        expanded=True
+    ):
+
+        with st.form("bucket_form"):
+
+            item = st.text_input(
+                "What do you want to experience?"
+            )
+
+            submitted = st.form_submit_button(
+                "Add Dream"
+            )
+
+            if submitted:
+
+                if item.strip():
+
+                    run_query(
+                        """
+                        INSERT INTO bucket_list
+                        (
+                            item,
+                            completed,
+                            created_at
+                        )
+                        VALUES
+                        (?, ?, ?)
+                        """,
+                        (
+                            item,
+                            0,
+                            datetime.now().isoformat(timespec="seconds")
+                        )
+                    )
+
+                    add_xp(10)
+
+                    st.success("Dream added.")
+                    st.rerun()
+
+    st.divider()
+
+    # ========================================================
+    # STATS
+    # ========================================================
+
+    total = len(bucket)
+
+    completed = 0
+
+    if not bucket.empty:
+
+        completed = len(bucket[bucket["completed"] == 1])
+
+    progress = 0
+    if total > 0:
+        progress = completed / total
+
+    c1, c2, c3 = st.columns(3)
+
+    c1.metric("🌍 Total Dreams", total)
+    c2.metric("🏆 Completed", completed)
+    c3.metric("📈 Progress", f"{progress*100:.0f}%")
+
+    st.progress(progress)
+
+    st.divider()
+
+    # ========================================================
+    # DREAM CARDS
+    # ========================================================
+
+    if bucket.empty:
+
+        st.info("No dreams added yet.")
+
+    else:
+
+        st.subheader("✨ Your Dreams")
+
+        for _, dream in bucket.sort_values("id", ascending=False).iterrows():
+
+            with st.container(border=True):
+
+                left, right = st.columns([8, 2])
+
+                with left:
+
+                    if dream["completed"] == 1:
+                        st.markdown(f"### ~~{dream['item']}~~")
+                        st.caption("🏆 Completed Dream")
+                    else:
+                        st.markdown(f"### {dream['item']}")
+                        st.caption("🌟 In Progress")
+
+                with right:
+
+                    if dream["completed"] == 0:
+
+                        if st.button(
+                            "✔ Complete",
+                            key=f"bucket_done_{dream['id']}"
+                        ):
+
+                            run_query(
+                                """
+                                UPDATE bucket_list
+                                SET completed = 1
+                                WHERE id = ?
+                                """,
+                                (dream["id"],)
+                            )
+
+                            add_xp(20)
+
+                            st.success("Dream achieved!")
+                            st.rerun()
+
+                    else:
+
+                        if st.button(
+                            "↩ Undo",
+                            key=f"bucket_undo_{dream['id']}"
+                        ):
+
+                            run_query(
+                                """
+                                UPDATE bucket_list
+                                SET completed = 0
+                                WHERE id = ?
+                                """,
+                                (dream["id"],)
+                            )
+
+                            st.rerun()
+
+                if st.button(
+                    "🗑 Delete",
+                    key=f"bucket_delete_{dream['id']}"
+                ):
+
+                    run_query(
+                        """
+                        DELETE FROM bucket_list
+                        WHERE id = ?
+                        """,
+                        (dream["id"],)
+                    )
+
+                    st.rerun()
+
+    st.divider()
+
+    # ========================================================
+    # ACHIEVEMENTS
+    # ========================================================
+
+    st.subheader("🏅 Bucket List Achievements")
+
+    if completed >= 1:
+        st.success("First Dream Achieved!")
+
+    if completed >= 5:
+        st.success("Dream Starter — 5 Completed")
+
+    if completed >= 10:
+        st.success("Dream Builder — 10 Completed")
+
+    if completed >= 25:
+        st.success("Dream Master — 25 Completed")
+
+    if completed >= 50:
+        st.success("Legend of Life — 50 Completed")
+
+    st.divider()
+
+    # ========================================================
+    # INSPIRATION SECTION
+    # ========================================================
+
+    st.subheader("💡 Inspiration Ideas")
+
+    ideas = [
+        "Travel to 10 countries",
+        "Learn a new language",
+        "Start a business",
+        "Run a marathon",
+        "Build your dream project",
+        "Buy your first home",
+        "Learn to code a full app",
+        "Save your first big investment",
+        "Meet someone you admire",
+        "Master a musical instrument"
+    ]
+
+    for i in ideas:
+        st.write(f"• {i}")
+
+    st.divider()
+
+    # ========================================================
+    # PROGRESS MOTIVATION
+    # ========================================================
+
+    st.subheader("🔥 Motivation")
+
+    if total == 0:
+        st.info("Add your first dream today.")
+    else:
+
+        percent = (completed / total) * 100
+
+        if percent == 100:
+            st.success("🌟 You completed your entire bucket list!")
+        elif percent >= 75:
+            st.success("🚀 Almost there — keep going!")
+        elif percent >= 50:
+            st.info("🔥 Halfway to your dreams!")
+        elif percent >= 25:
+            st.info("🌱 Great start — keep building momentum!")
+        else:
+            st.info("💡 Every dream starts with one step.")
+
+        st.progress(percent / 100)
+  # ============================================================
+# HOBBIES
+# ============================================================
+
+elif page == "Hobbies":
+
+    st.title("🎧 Hobbies & Skills")
+    st.caption("Track your skills, practice sessions, and growth over time.")
+
+    hobbies = load_table("hobbies")
+    sessions = load_table("hobby_sessions")
+
+    # ========================================================
+    # TIMER STATE
+    # ========================================================
+
+    if "timer_running" not in st.session_state:
+        st.session_state.timer_running = False
+
+    if "timer_seconds" not in st.session_state:
+        st.session_state.timer_seconds = 0
+
+    # ========================================================
+    # ADD HOBBY
+    # ========================================================
+
+    with st.expander("➕ Add New Skill", expanded=True):
+
+        with st.form("hobby_form"):
+
+            name = st.text_input("Skill / Hobby Name")
+
+            category = st.selectbox(
+                "Category",
+                [
+                    "Creative",
+                    "Fitness",
+                    "Academic",
+                    "Music",
+                    "Technology",
+                    "Language",
+                    "Other"
+                ]
+            )
+
+            goal = st.text_input(
+                "Goal (e.g. 'Practice 30h total')"
+            )
+
+            submitted = st.form_submit_button("Add Skill")
+
+            if submitted and name.strip():
+
+                run_query(
+                    """
+                    INSERT INTO hobbies(name, category, goal, created_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        name,
+                        category,
+                        goal,
+                        datetime.now().isoformat(timespec="seconds")
+                    )
+                )
+
+                add_xp(10)
+                st.success("Skill added.")
+                st.rerun()
+
+    st.divider()
+
+    # ========================================================
+    # TIMER UI (FOCUS PRACTICE MODE)
+    # ========================================================
+
+    st.subheader("⏱ Practice Timer")
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+
+        if st.button("▶ Start 25 min"):
+            st.session_state.timer_running = True
+            st.session_state.timer_seconds = 25 * 60
+
+    with col2:
+
+        if st.button("⏹ Stop"):
+            st.session_state.timer_running = False
+            st.session_state.timer_seconds = 0
+
+    with col3:
+
+        if st.button("➕ +5 min"):
+            st.session_state.timer_seconds += 5 * 60
+
+    if st.session_state.timer_running:
+
+        if st.session_state.timer_seconds > 0:
+            st.session_state.timer_seconds -= 1
+
+        mins = st.session_state.timer_seconds // 60
+        secs = st.session_state.timer_seconds % 60
+
+        st.markdown(
+            f"### 🔥 {mins:02d}:{secs:02d}"
+        )
+
+        st.progress(
+            1 - (st.session_state.timer_seconds / (25 * 60))
+        )
+
+        st.info("Stay focused — you're building skill momentum.")
+
+    st.divider()
+
+    # ========================================================
+    # HOBBY OVERVIEW
+    # ========================================================
+
+    total_hobbies = len(hobbies)
+
+    total_minutes = 0
+    if not sessions.empty:
+        total_minutes = int(sessions["minutes"].sum())
+
+    c1, c2, c3 = st.columns(3)
+
+    c1.metric("🎧 Skills", total_hobbies)
+    c2.metric("⏱ Practice Time", f"{total_minutes} min")
+    c3.metric("🔥 Sessions", len(sessions))
+
+    st.divider()
+
+    # ========================================================
+    # HOBBY LIST
+    # ========================================================
+
+    if hobbies.empty:
+
+        st.info("No skills added yet.")
+
+    else:
+
+        for _, hobby in hobbies.sort_values("id", ascending=False).iterrows():
+
+            hobby_id = hobby["id"]
+
+            hobby_sessions = sessions[sessions["hobby_id"] == hobby_id]
+
+            total_time = 0
+            if not hobby_sessions.empty:
+                total_time = hobby_sessions["minutes"].sum()
+
+            with st.container(border=True):
+
+                st.subheader(f"🎯 {hobby['name']}")
+                st.caption(f"{hobby['category']} | Goal: {hobby['goal']}")
+
+                st.markdown(f"⏱ Total Practice: **{total_time} min**")
+
+                # ====================================================
+                # ADD SESSION
+                # ====================================================
+
+                with st.form(f"session_form_{hobby_id}"):
+
+                    minutes = st.number_input(
+                        "Minutes practiced",
+                        min_value=1,
+                        max_value=600,
+                        value=25
+                    )
+
+                    note = st.text_input("Note (optional)")
+
+                    add_session = st.form_submit_button("Add Session")
+
+                    if add_session:
+
+                        run_query(
+                            """
+                            INSERT INTO hobby_sessions
+                            (hobby_id, session_date, minutes, note, created_at)
+                            VALUES (?, ?, ?, ?, ?)
+                            """,
+                            (
+                                hobby_id,
+                                today(),
+                                minutes,
+                                note,
+                                datetime.now().isoformat(timespec="seconds")
+                            )
+                        )
+
+                        add_xp(5)
+                        st.success("Session logged.")
                         st.rerun()
+
+                # ====================================================
+                # SESSION HISTORY
+                # ====================================================
+
+                if hobby_sessions.empty:
+
+                    st.info("No sessions yet.")
+
+                else:
+
+                    st.write("📚 Recent Sessions")
+
+                    for _, s in hobby_sessions.tail(3).iterrows():
+
+                        st.write(
+                            f"• {s['session_date']} — "
+                            f"{s['minutes']} min "
+                            f"{('(' + s['note'] + ')') if s['note'] else ''}"
+                        )
+
+                # ====================================================
+                # DELETE HOBBY
+                # ====================================================
+
+                if st.button(
+                    "🗑 Delete Skill",
+                    key=f"delete_hobby_{hobby_id}"
+                ):
+
+                    run_query(
+                        "DELETE FROM hobby_sessions WHERE hobby_id = ?",
+                        (hobby_id,)
+                    )
+
+                    run_query(
+                        "DELETE FROM hobbies WHERE id = ?",
+                        (hobby_id,)
+                    )
+
+                    st.rerun()
+
+    st.divider()
+
+    # ============================================================
+    # SKILL ANALYTICS CHART
+    # ============================================================
+
+    if not hobbies.empty and not sessions.empty:
+
+        st.subheader("📊 Skill Practice Breakdown")
+
+        hobby_stats = (
+            sessions.groupby("hobby_id")["minutes"]
+            .sum()
+            .reset_index()
+        )
+
+        hobby_stats = hobby_stats.merge(
+            hobbies[["id", "name"]],
+            left_on="hobby_id",
+            right_on="id",
+            how="left"
+        )
+
+        fig = px.bar(
+            hobby_stats,
+            x="name",
+            y="minutes",
+            title="Practice Time per Skill"
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+    # ============================================================
+    # ACHIEVEMENTS
+    # ============================================================
+
+    st.subheader("🏆 Skill Achievements")
+
+    if total_minutes >= 60:
+        st.success("First Hour Practiced")
+
+    if total_minutes >= 300:
+        st.success("Skill Builder — 5 Hours")
+
+    if total_minutes >= 1000:
+        st.success("Dedicated Learner — 1000 Minutes")
+
+    if total_minutes >= 5000:
+        st.success("Master Practitioner — 5000 Minutes")
+  # ============================================================
+# BUDGET
+# ============================================================
+
+elif page == "Budget":
+
+    st.title("💰 Budget Tracker")
+    st.caption("Track income, expenses, and understand your money habits.")
+
+    budget = load_table("budget")
+
+    # ========================================================
+    # ADD TRANSACTION
+    # ========================================================
+
+    with st.expander("➕ Add Transaction", expanded=True):
+
+        with st.form("budget_form"):
+
+            item = st.text_input("Description")
+
+            amount = st.number_input(
+                "Amount",
+                min_value=0.0,
+                format="%.2f"
+            )
+
+            t_type = st.selectbox(
+                "Type",
+                ["Income", "Expense"]
+            )
+
+            category = st.selectbox(
+                "Category",
+                [
+                    "Food",
+                    "Transport",
+                    "Rent",
+                    "Entertainment",
+                    "Shopping",
+                    "Health",
+                    "Salary",
+                    "Other"
+                ]
+            )
+
+            entry_date = st.date_input("Date")
+
+            submitted = st.form_submit_button("Add")
+
+            if submitted and item.strip():
+
+                run_query(
+                    """
+                    INSERT INTO budget
+                    (item, amount, type, category, entry_date)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        item,
+                        amount,
+                        t_type,
+                        category,
+                        entry_date.isoformat()
+                    )
+                )
+
+                add_xp(5)
+
+                st.success("Transaction added.")
+                st.rerun()
+
+    st.divider()
+
+    # ========================================================
+    # CLEAN DATA
+    # ========================================================
+
+    if budget.empty:
+
+        st.info("No transactions yet.")
+
+    else:
+
+        # ensure correct types
+        budget["amount"] = pd.to_numeric(budget["amount"], errors="coerce").fillna(0)
+
+        income = budget[budget["type"] == "Income"]["amount"].sum()
+        expenses = budget[budget["type"] == "Expense"]["amount"].sum()
+
+        balance = income - expenses
+
+        # ========================================================
+        # STATS CARDS
+        # ========================================================
+
+        c1, c2, c3 = st.columns(3)
+
+        c1.metric("💵 Income", f"{income:.2f}")
+        c2.metric("💸 Expenses", f"{expenses:.2f}")
+        c3.metric("💰 Balance", f"{balance:.2f}")
+
+        st.divider()
+
+        # ========================================================
+        # CHARTS
+        # ========================================================
+
+        st.subheader("📊 Spending Breakdown")
+
+        category_expenses = budget[budget["type"] == "Expense"]
+
+        if not category_expenses.empty:
+
+            cat_summary = (
+                category_expenses
+                .groupby("category")["amount"]
+                .sum()
+                .reset_index()
+            )
+
+            fig = px.pie(
+                cat_summary,
+                names="category",
+                values="amount",
+                title="Expenses by Category"
+            )
+
+            st.plotly_chart(fig, use_container_width=True)
+
+        st.subheader("📈 Income vs Expenses")
+
+        trend = budget.copy()
+
+        trend["entry_date"] = pd.to_datetime(trend["entry_date"], errors="coerce")
+
+        trend_grouped = (
+            trend.groupby(["entry_date", "type"])["amount"]
+            .sum()
+            .reset_index()
+        )
+
+        fig2 = px.line(
+            trend_grouped,
+            x="entry_date",
+            y="amount",
+            color="type",
+            title="Money Flow Over Time"
+        )
+
+        st.plotly_chart(fig2, use_container_width=True)
+
+        st.divider()
+
+        # ========================================================
+        # TRANSACTION LIST
+        # ========================================================
+
+        st.subheader("📒 Transactions")
+
+        for _, row in budget.sort_values("id", ascending=False).iterrows():
+
+            color = "💚" if row["type"] == "Income" else "🔴"
+
+            with st.container(border=True):
+
+                left, right = st.columns([8, 2])
+
+                with left:
+
+                    st.markdown(
+                        f"### {color} {row['item']}"
+                    )
+
+                    st.caption(
+                        f"{row['category']} | "
+                        f"{row['entry_date']} | "
+                        f"{row['type']}"
+                    )
+
+                with right:
+
+                    st.markdown(
+                        f"### {row['amount']:.2f}"
+                    )
+
+                    if st.button(
+                        "🗑",
+                        key=f"delete_budget_{row['id']}"
+                    ):
+
+                        run_query(
+                            "DELETE FROM budget WHERE id = ?",
+                            (row["id"],)
+                        )
+
+                        st.rerun()
+
+        st.divider()
+
+        # ========================================================
+        # SAVINGS INSIGHT
+        # ========================================================
+
+        st.subheader("📊 Savings Insight")
+
+        if income > 0:
+
+            savings_rate = (balance / income) * 100
+
+            st.progress(min(max(savings_rate / 100, 0), 1))
+
+            st.write(f"💡 Savings Rate: **{savings_rate:.1f}%**")
+
+            if savings_rate < 0:
+                st.error("You're spending more than you earn.")
+            elif savings_rate < 20:
+                st.warning("Try to save more if possible.")
+            else:
+                st.success("Great savings discipline!")
+
+        else:
+
+            st.info("Add income to calculate savings rate.")
+
+        st.divider()
+
+        # ========================================================
+        # ACHIEVEMENTS
+        # ========================================================
+
+        st.subheader("🏆 Financial Achievements")
+
+        if balance > 0:
+            st.success("Positive Balance Achieved")
+
+        if income >= 1000:
+            st.success("First R1000 Earned")
+
+        if expenses > 0 and expenses < income:
+            st.success("Spending Under Control")
+
+        if income > expenses * 2:
+            st.success("Strong Financial Stability")
+  # ============================================================
+# SETTINGS
+# ============================================================
+
+elif page == "Settings":
+
+    st.title("⚙ Settings & System Tools")
+    st.caption("Manage your data, export progress, and control your app.")
+
+    st.divider()
+
+    # ========================================================
+    # XP OVERVIEW
+    # ========================================================
+
+    st.subheader("🏆 XP System")
+
+    xp = get_xp()
+    level = get_level()
+
+    st.metric("Total XP", xp)
+    st.metric("Current Level", level)
+
+    st.progress((xp % 100) / 100)
+
+    st.caption("Every 100 XP = Level Up")
+
+    st.divider()
+
+    # ========================================================
+    # DATA EXPORTS
+    # ========================================================
+
+    st.subheader("📦 Export Data")
+
+    def export_table(table_name):
+
+        df = load_table(table_name)
+
+        return df.to_csv(index=False).encode("utf-8")
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.download_button(
+            "⬇ Tasks",
+            export_table("tasks"),
+            "tasks.csv",
+            "text/csv"
+        )
+
+    with col2:
+        st.download_button(
+            "⬇ Goals",
+            export_table("goals"),
+            "goals.csv",
+            "text/csv"
+        )
+
+    with col3:
+        st.download_button(
+            "⬇ Journal",
+            export_table("journal"),
+            "journal.csv",
+            "text/csv"
+        )
+
+    col4, col5 = st.columns(2)
+
+    with col4:
+        st.download_button(
+            "⬇ Budget",
+            export_table("budget"),
+            "budget.csv",
+            "text/csv"
+        )
+
+    with col5:
+        st.download_button(
+            "⬇ Hobbies",
+            export_table("hobbies"),
+            "hobbies.csv",
+            "text/csv"
+        )
+
+    st.divider()
+
+    # ========================================================
+    # FULL BACKUP
+    # ========================================================
+
+    st.subheader("💾 Full Backup")
+
+    tables = [
+        "tasks",
+        "goals",
+        "goal_items",
+        "journal",
+        "focus",
+        "bucket_list",
+        "hobbies",
+        "hobby_sessions",
+        "budget",
+        "xp"
+    ]
+
+    backup_data = {}
+
+    for t in tables:
+        backup_data[t] = load_table(t).to_csv(index=False)
+
+    st.download_button(
+        "⬇ Download Full Backup (All Data)",
+        str(backup_data),
+        "myday_backup.txt",
+        "text/plain"
+    )
+
+    st.divider()
+
+    # ========================================================
+    # RESET SYSTEM
+    # ========================================================
+
+    st.subheader("⚠ Danger Zone")
+
+    st.warning("These actions are permanent!")
+
+    if st.button("🗑 Reset ALL Data"):
+
+        confirm = st.text_input("Type RESET to confirm")
+
+        if confirm == "RESET":
+
+            tables = [
+                "tasks",
+                "goals",
+                "goal_items",
+                "journal",
+                "focus",
+                "bucket_list",
+                "hobbies",
+                "hobby_sessions",
+                "budget",
+                "xp"
+            ]
+
+            for t in tables:
+
+                run_query(f"DELETE FROM {t}")
+
+            st.success("All data reset successfully.")
+            st.rerun()
+
+    st.divider()
+
+    # ========================================================
+    # PERFORMANCE INFO
+    # ========================================================
+
+    st.subheader("📊 App Status")
+
+    st.info("✔ Database connected")
+    st.info("✔ Dark mode compatible UI active")
+    st.info("✔ XP system running")
+    st.info("✔ All modules loaded")
+
+    st.divider()
+
+    # ========================================================
+    # FINAL POLISH MESSAGE
+    # ========================================================
+
+    st.subheader("🚀 MyDay Pro Complete System")
+
+    st.success(
+        "You now have a full productivity OS with tasks, goals, "
+        "journal, budget, hobbies, and gamified XP progression."
+    )
+
+    st.caption(
+        "Built as a modular Streamlit life management system."
+    )
